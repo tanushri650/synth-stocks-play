@@ -13,7 +13,7 @@ const STOCKS = [
 ];
 
 const Trading = () => {
-  const { user, spendCoins, addCoins, updateHoldings, incrementTrades } = useUser();
+  const { user, spendCoins, addCoins, updateHoldings, incrementTrades, addTradeMistake } = useUser();
   const [selected, setSelected] = useState(STOCKS[0]);
   const [qty, setQty] = useState(1);
   const [msg, setMsg] = useState('');
@@ -43,6 +43,17 @@ const Trading = () => {
     if (!holding || holding.shares < qty) { setMsg('Not enough shares!'); return; }
     const revenue = selected.price * qty;
     addCoins(revenue);
+    // Track losing trade
+    if (selected.price < holding.avgPrice) {
+      const loss = (holding.avgPrice - selected.price) * qty;
+      addTradeMistake({
+        symbol: selected.symbol,
+        buyPrice: holding.avgPrice,
+        sellPrice: selected.price,
+        shares: qty,
+        loss,
+      });
+    }
     const remaining = holding.shares - qty;
     const newHoldings = remaining === 0
       ? user.holdings.filter(h => h.symbol !== selected.symbol)

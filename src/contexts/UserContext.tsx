@@ -29,6 +29,23 @@ export interface Holding {
   avgPrice: number;
 }
 
+export interface QuizMistake {
+  moduleTitle: string;
+  question: string;
+  yourAnswer: string;
+  correctAnswer: string;
+  timestamp: number;
+}
+
+export interface TradeMistake {
+  symbol: string;
+  buyPrice: number;
+  sellPrice: number;
+  shares: number;
+  loss: number;
+  timestamp: number;
+}
+
 export interface User {
   username: string;
   coins: number;
@@ -58,6 +75,10 @@ interface UserContextType {
   likePost: (postId: string) => void;
   dislikePost: (postId: string) => void;
   deletePost: (postId: string) => void;
+  quizMistakes: QuizMistake[];
+  tradeMistakes: TradeMistake[];
+  addQuizMistake: (mistake: Omit<QuizMistake, 'timestamp'>) => void;
+  addTradeMistake: (mistake: Omit<TradeMistake, 'timestamp'>) => void;
 }
 
 const UserContext = createContext<UserContextType | null>(null);
@@ -70,6 +91,8 @@ export const useUser = () => {
 
 const STORAGE_KEY = 'stockz_user';
 const FORUM_KEY = 'stockz_forum';
+const QUIZ_MISTAKES_KEY = 'stockz_quiz_mistakes';
+const TRADE_MISTAKES_KEY = 'stockz_trade_mistakes';
 
 export const UserProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(() => {
@@ -197,11 +220,38 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     setForumPosts(posts => posts.filter(p => p.id !== postId));
   };
 
+  const [quizMistakes, setQuizMistakes] = useState<QuizMistake[]>(() => {
+    const saved = localStorage.getItem(QUIZ_MISTAKES_KEY);
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  const [tradeMistakes, setTradeMistakes] = useState<TradeMistake[]>(() => {
+    const saved = localStorage.getItem(TRADE_MISTAKES_KEY);
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  useEffect(() => {
+    localStorage.setItem(QUIZ_MISTAKES_KEY, JSON.stringify(quizMistakes));
+  }, [quizMistakes]);
+
+  useEffect(() => {
+    localStorage.setItem(TRADE_MISTAKES_KEY, JSON.stringify(tradeMistakes));
+  }, [tradeMistakes]);
+
+  const addQuizMistake = (mistake: Omit<QuizMistake, 'timestamp'>) => {
+    setQuizMistakes(prev => [{ ...mistake, timestamp: Date.now() }, ...prev]);
+  };
+
+  const addTradeMistake = (mistake: Omit<TradeMistake, 'timestamp'>) => {
+    setTradeMistakes(prev => [{ ...mistake, timestamp: Date.now() }, ...prev]);
+  };
+
   return (
     <UserContext.Provider value={{
       user, signup, logout, addCoins, spendCoins, addXp,
       completeModule, updateHoldings, incrementTrades, addBadge,
       forumPosts, addForumPost, addReply, likePost, dislikePost, deletePost,
+      quizMistakes, tradeMistakes, addQuizMistake, addTradeMistake,
     }}>
       {children}
     </UserContext.Provider>
