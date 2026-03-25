@@ -29,6 +29,23 @@ export interface Holding {
   avgPrice: number;
 }
 
+export interface QuizMistake {
+  moduleTitle: string;
+  question: string;
+  yourAnswer: string;
+  correctAnswer: string;
+  timestamp: number;
+}
+
+export interface TradeMistake {
+  symbol: string;
+  buyPrice: number;
+  sellPrice: number;
+  shares: number;
+  loss: number;
+  timestamp: number;
+}
+
 export interface User {
   username: string;
   coins: number;
