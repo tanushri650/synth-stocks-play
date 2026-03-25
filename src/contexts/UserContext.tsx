@@ -55,6 +55,9 @@ interface UserContextType {
   forumPosts: ForumPost[];
   addForumPost: (content: string) => void;
   addReply: (postId: string, content: string) => void;
+  likePost: (postId: string) => void;
+  dislikePost: (postId: string) => void;
+  deletePost: (postId: string) => void;
 }
 
 const UserContext = createContext<UserContextType | null>(null);
