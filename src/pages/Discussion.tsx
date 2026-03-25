@@ -2,12 +2,14 @@ import { useState } from 'react';
 import { useUser } from '@/contexts/UserContext';
 import { Layout } from '@/components/Layout';
 import { motion } from 'framer-motion';
+import { ThumbsUp, ThumbsDown, MessageSquare, Trash2 } from 'lucide-react';
 
 const Discussion = () => {
-  const { user, forumPosts, addForumPost, addReply } = useUser();
+  const { user, forumPosts, addForumPost, addReply, likePost, dislikePost, deletePost } = useUser();
   const [newPost, setNewPost] = useState('');
   const [replyTo, setReplyTo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
+  const [expandedComments, setExpandedComments] = useState<Set<string>>(new Set());
 
   if (!user) return null;
 
@@ -23,6 +25,15 @@ const Discussion = () => {
     addReply(postId, replyText.trim());
     setReplyText('');
     setReplyTo(null);
+  };
+
+  const toggleComments = (postId: string) => {
+    setExpandedComments(prev => {
+      const next = new Set(prev);
+      if (next.has(postId)) next.delete(postId);
+      else next.add(postId);
+      return next;
+    });
   };
 
   const timeAgo = (ts: number) => {
@@ -59,36 +70,62 @@ const Discussion = () => {
             >
               <div className="flex justify-between items-start mb-2">
                 <span className="font-mono text-xs text-primary">{post.author}</span>
-                <span className="font-mono text-xs text-muted-foreground">{timeAgo(post.timestamp)}</span>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-xs text-muted-foreground">{timeAgo(post.timestamp)}</span>
+                  {post.author === user.username && (
+                    <button onClick={() => deletePost(post.id)} className="text-muted-foreground hover:text-destructive transition-colors">
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
-              <p className="text-sm text-foreground">{post.content}</p>
+              <p className="text-sm text-foreground mb-3">{post.content}</p>
 
-              {post.replies.length > 0 && (
-                <div className="mt-3 ml-4 space-y-2 border-l border-border pl-3">
-                  {post.replies.map((r, ri) => (
-                    <div key={ri}>
-                      <span className="font-mono text-xs text-secondary">{r.author}</span>
-                      <span className="font-mono text-xs text-muted-foreground ml-2">{timeAgo(r.timestamp)}</span>
-                      <p className="text-xs text-foreground mt-0.5">{r.content}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {replyTo === post.id ? (
-                <div className="mt-3 flex gap-2">
-                  <input value={replyText} onChange={e => setReplyText(e.target.value)}
-                    className="flex-1 bg-muted border border-border rounded px-3 py-1.5 font-mono text-xs text-foreground focus:outline-none focus:border-primary"
-                    placeholder="Reply..."
-                    onKeyDown={e => e.key === 'Enter' && handleReply(post.id)}
-                  />
-                  <button onClick={() => handleReply(post.id)} className="btn-cyber-primary text-xs py-1.5">Send</button>
-                  <button onClick={() => setReplyTo(null)} className="font-mono text-xs text-muted-foreground">Cancel</button>
-                </div>
-              ) : (
-                <button onClick={() => setReplyTo(post.id)} className="font-mono text-xs text-muted-foreground hover:text-primary mt-2">
-                  Reply
+              <div className="flex items-center gap-4 border-t border-border pt-3">
+                <button onClick={() => likePost(post.id)} className="flex items-center gap-1.5 font-mono text-xs text-muted-foreground hover:text-neon-green transition-colors">
+                  <ThumbsUp className="h-3.5 w-3.5" />
+                  <span>{post.likes}</span>
                 </button>
+                <button onClick={() => dislikePost(post.id)} className="flex items-center gap-1.5 font-mono text-xs text-muted-foreground hover:text-destructive transition-colors">
+                  <ThumbsDown className="h-3.5 w-3.5" />
+                  <span>{post.dislikes}</span>
+                </button>
+                <button onClick={() => toggleComments(post.id)} className="flex items-center gap-1.5 font-mono text-xs text-muted-foreground hover:text-primary transition-colors">
+                  <MessageSquare className="h-3.5 w-3.5" />
+                  <span>{post.replies.length} comments</span>
+                </button>
+              </div>
+
+              {expandedComments.has(post.id) && (
+                <div className="mt-3 space-y-2">
+                  {post.replies.length > 0 && (
+                    <div className="ml-4 space-y-2 border-l border-border pl-3">
+                      {post.replies.map((r, ri) => (
+                        <div key={ri}>
+                          <span className="font-mono text-xs text-secondary">{r.author}</span>
+                          <span className="font-mono text-xs text-muted-foreground ml-2">{timeAgo(r.timestamp)}</span>
+                          <p className="text-xs text-foreground mt-0.5">{r.content}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {replyTo === post.id ? (
+                    <div className="flex gap-2 mt-2">
+                      <input value={replyText} onChange={e => setReplyText(e.target.value)}
+                        className="flex-1 bg-muted border border-border rounded px-3 py-1.5 font-mono text-xs text-foreground focus:outline-none focus:border-primary"
+                        placeholder="Write a comment..."
+                        onKeyDown={e => e.key === 'Enter' && handleReply(post.id)}
+                      />
+                      <button onClick={() => handleReply(post.id)} className="btn-cyber-primary text-xs py-1.5">Send</button>
+                      <button onClick={() => setReplyTo(null)} className="font-mono text-xs text-muted-foreground">Cancel</button>
+                    </div>
+                  ) : (
+                    <button onClick={() => setReplyTo(post.id)} className="font-mono text-xs text-muted-foreground hover:text-primary mt-1">
+                      + Add comment
+                    </button>
+                  )}
+                </div>
               )}
             </motion.div>
           ))}

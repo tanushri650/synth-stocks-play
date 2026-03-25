@@ -6,12 +6,20 @@ export interface ModuleProgress {
   score: number;
 }
 
+export interface ForumReply {
+  author: string;
+  content: string;
+  timestamp: number;
+}
+
 export interface ForumPost {
   id: string;
   author: string;
   content: string;
   timestamp: number;
-  replies: { author: string; content: string; timestamp: number }[];
+  likes: number;
+  dislikes: number;
+  replies: ForumReply[];
 }
 
 export interface Holding {
@@ -47,6 +55,9 @@ interface UserContextType {
   forumPosts: ForumPost[];
   addForumPost: (content: string) => void;
   addReply: (postId: string, content: string) => void;
+  likePost: (postId: string) => void;
+  dislikePost: (postId: string) => void;
+  deletePost: (postId: string) => void;
 }
 
 const UserContext = createContext<UserContextType | null>(null);
@@ -66,9 +77,25 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     return saved ? JSON.parse(saved) : null;
   });
 
+  const defaultPosts: ForumPost[] = [
+    { id: 'dummy-1', author: 'CyberTrader99', content: 'Just completed the Risk Management module. The 2% rule is a game changer! 🚀', timestamp: Date.now() - 3600000, likes: 12, dislikes: 1, replies: [
+      { author: 'NeonBull', content: 'Agreed! It saved me from huge losses in mock trading.', timestamp: Date.now() - 3000000 },
+      { author: 'PixelWhale', content: 'Which module did you do next?', timestamp: Date.now() - 2400000 },
+    ]},
+    { id: 'dummy-2', author: 'NeonBull', content: 'Anyone else think CYBR stock is overvalued in mock trading? Sitting at 340 coins per share seems high.', timestamp: Date.now() - 7200000, likes: 8, dislikes: 3, replies: [
+      { author: 'DataMiner42', content: 'It\'s been pumping since yesterday. I\'d wait for a dip.', timestamp: Date.now() - 6000000 },
+    ]},
+    { id: 'dummy-3', author: 'PixelWhale', content: 'Pro tip: Always diversify your mock portfolio. Don\'t put all coins into one stock! 📊', timestamp: Date.now() - 14400000, likes: 24, dislikes: 0, replies: [] },
+    { id: 'dummy-4', author: 'DataMiner42', content: 'The candlestick chart module was really helpful. Now I can read patterns much better.', timestamp: Date.now() - 28800000, likes: 15, dislikes: 2, replies: [
+      { author: 'CyberTrader99', content: 'Wait until you try applying it in live charts!', timestamp: Date.now() - 25200000 },
+      { author: 'AlphaVolt', content: 'The doji pattern explanation was 🔥', timestamp: Date.now() - 21600000 },
+    ]},
+    { id: 'dummy-5', author: 'AlphaVolt', content: 'Just hit Level 5! The grind is real but worth it. Veteran badge unlocked 🏆', timestamp: Date.now() - 43200000, likes: 31, dislikes: 0, replies: [] },
+  ];
+
   const [forumPosts, setForumPosts] = useState<ForumPost[]>(() => {
     const saved = localStorage.getItem(FORUM_KEY);
-    return saved ? JSON.parse(saved) : [];
+    return saved ? JSON.parse(saved) : defaultPosts;
   });
 
   useEffect(() => {
@@ -82,7 +109,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
 
   const signup = (username: string) => {
     setUser({
-      username, coins: 10000, xp: 0, level: 1,
+      username, coins: 0, xp: 0, level: 1,
       joinedAt: Date.now(), modules: [], holdings: [],
       trades: 0, badges: ['Newcomer'],
     });
@@ -140,7 +167,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     if (!user) return;
     setForumPosts(p => [{
       id: crypto.randomUUID(), author: user.username,
-      content, timestamp: Date.now(), replies: [],
+      content, timestamp: Date.now(), likes: 0, dislikes: 0, replies: [],
     }, ...p]);
   };
 
@@ -151,11 +178,23 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     ));
   };
 
+  const likePost = (postId: string) => {
+    setForumPosts(posts => posts.map(p => p.id === postId ? { ...p, likes: p.likes + 1 } : p));
+  };
+
+  const dislikePost = (postId: string) => {
+    setForumPosts(posts => posts.map(p => p.id === postId ? { ...p, dislikes: p.dislikes + 1 } : p));
+  };
+
+  const deletePost = (postId: string) => {
+    setForumPosts(posts => posts.filter(p => p.id !== postId));
+  };
+
   return (
     <UserContext.Provider value={{
       user, signup, logout, addCoins, spendCoins, addXp,
       completeModule, updateHoldings, incrementTrades, addBadge,
-      forumPosts, addForumPost, addReply,
+      forumPosts, addForumPost, addReply, likePost, dislikePost, deletePost,
     }}>
       {children}
     </UserContext.Provider>

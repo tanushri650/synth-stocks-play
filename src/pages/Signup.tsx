@@ -53,7 +53,7 @@ const Signup = () => {
             Initialize Account
           </button>
           <p className="text-center text-xs text-muted-foreground font-mono">
-            You'll receive <span className="text-primary">10,000</span> virtual coins
+            Start with <span className="text-primary">0</span> coins — earn them through modules & trading!
           </p>
         </form>
       </motion.div>
