@@ -167,7 +167,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     if (!user) return;
     setForumPosts(p => [{
       id: crypto.randomUUID(), author: user.username,
-      content, timestamp: Date.now(), replies: [],
+      content, timestamp: Date.now(), likes: 0, dislikes: 0, replies: [],
     }, ...p]);
   };
 
@@ -178,11 +178,23 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     ));
   };
 
+  const likePost = (postId: string) => {
+    setForumPosts(posts => posts.map(p => p.id === postId ? { ...p, likes: p.likes + 1 } : p));
+  };
+
+  const dislikePost = (postId: string) => {
+    setForumPosts(posts => posts.map(p => p.id === postId ? { ...p, dislikes: p.dislikes + 1 } : p));
+  };
+
+  const deletePost = (postId: string) => {
+    setForumPosts(posts => posts.filter(p => p.id !== postId));
+  };
+
   return (
     <UserContext.Provider value={{
       user, signup, logout, addCoins, spendCoins, addXp,
       completeModule, updateHoldings, incrementTrades, addBadge,
-      forumPosts, addForumPost, addReply,
+      forumPosts, addForumPost, addReply, likePost, dislikePost, deletePost,
     }}>
       {children}
     </UserContext.Provider>
