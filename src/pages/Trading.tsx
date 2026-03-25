@@ -13,7 +13,7 @@ const STOCKS = [
 ];
 
 const Trading = () => {
-  const { user, spendCoins, addCoins, updateHoldings, incrementTrades } = useUser();
+  const { user, spendCoins, addCoins, updateHoldings, incrementTrades, addTradeMistake } = useUser();
   const [selected, setSelected] = useState(STOCKS[0]);
   const [qty, setQty] = useState(1);
   const [msg, setMsg] = useState('');
