@@ -180,7 +180,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
+origins = [
+    "http://localhost:8080",               # for local dev testing
+    "https://synth-stocks-play.vercel.app",         # your Vercel URL (update this)
+]
 
 import time
 
