@@ -11,8 +11,10 @@ def load_csv_history():
     - 75% Live Streaming Data (for Step 4)
     """
     print("Loading CSV datasets for simulation engine...")
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    data_dir = os.path.join(base_dir, "real_stock_data")
+    # Path relative to backend/backend/csv_loader.py
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    backend_root = os.path.dirname(current_dir)
+    data_dir = os.path.join(backend_root, "real_stock_data")
     
     mapping = {
         "TCS": "TCS.csv",

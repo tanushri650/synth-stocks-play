@@ -175,7 +175,9 @@ const BiweeklyTestContent = () => {
 
   // ── WEBSOCKET ──
   useEffect(() => {
-    const ws = new WebSocket('ws://localhost:8080/ws');
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsHost = window.location.hostname === 'localhost' ? 'localhost:8080' : 'synth-stocks-backend.onrender.com'; // Placeholder for production
+    const ws = new WebSocket(`${protocol}//${wsHost}/ws`);
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data.type === 'history') {

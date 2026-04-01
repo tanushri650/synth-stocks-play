@@ -3,35 +3,24 @@ import os
 import time
 from dotenv import load_dotenv
 
+# Load environment variables (API keys, etc.)
+load_dotenv()
+
+# Ensure the system can find your project modules
 sys.path.append("D:/stocksimulator")
 
+# Module Imports
 from market_engine import MarketEngine
 from candle_engine import CandleEngine
 from state import state
-
 from analytics.risk_engine import RiskEngine
 from analytics.pattern_engine import PatternEngine
-
 from event_engine import EventEngine
 from news_engine import NewsEngine, news_to_event
 from csv_loader import load_csv_history
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-load_dotenv(os.path.join(BASE_DIR, ".env"))
-API_KEYS = []
-for key_name in ["GEMINI_API_KEY", "GEMINI_API_KEY1", "GEMINI_API_KEY2"]:
-    val = os.getenv(key_name)
-    if val:
-        API_KEYS.append(val)
-
-print("LOADED KEYS:", len(API_KEYS))
-
-if not API_KEYS:
-    raise ValueError("❌ No GEMINI_API_KEY found")
-
-
 # -------- INIT SYSTEM --------
-# ✅ FIX: pass sector_map
+# Pass sector_map from state to the EventEngine
 event_engine = EventEngine(state.sector_map)
 
 engine = MarketEngine(state, event_engine)
@@ -40,69 +29,75 @@ candle_engine = CandleEngine()
 risk_engine = RiskEngine()
 pattern_engine = PatternEngine()
 
-news_engine = NewsEngine(API_KEYS)
+# ✅ FIX: NewsEngine() now handles its own keys from .env. 
+# No need to pass 'API_KEYS' here.
+news_engine = NewsEngine()
 
+# Initialize historical data
 load_csv_history()
 
 # -------- RATE CONTROL --------
 last_news_time = 0
-NEWS_INTERVAL = 600   # 10 minutes
+# ✅ UPDATED: Setting this to 20 seconds as per your requirement
+NEWS_INTERVAL = 20  
 
 
 # -------- MAIN LOOP --------
-while True:
+print("--- [STARTING] Stock Simulator Run Engine ---")
 
+while True:
     # -------- STEP 1: MARKET UPDATE --------
+    # Generates a price tick and updates candles
     engine.generate_tick(candle_engine)
 
-    # -------- STEP 2: EVENT CLEANUP (FIXED) --------
+    # -------- STEP 2: EVENT CLEANUP --------
     event_engine.cleanup()
 
-    print("\n========== MARKET SNAPSHOT ==========")
+    # -------- CONSOLE SNAPSHOT (Optional: Clear screen for cleaner UI) --------
+    # os.system('cls' if os.name == 'nt' else 'clear') 
+    
+    print(f"\n========== MARKET SNAPSHOT [{time.strftime('%H:%M:%S')}] ==========")
 
     print("\nLive Prices:")
     for stock, price in state.stock_prices.items():
-        print(stock, round(price, 2))
+        print(f"{stock:12}: {round(price, 2)}")
 
     if state.tick_data:
         last = state.tick_data[-1]
-        print("\nLatest Tick Volume:", last["stock"], last["volume"])
+        print(f"\nLatest Tick: {last['stock']} | Volume: {last['volume']}")
 
-    print("\nCandles formed:")
-    for stock in state.stock_prices:
-        print(stock, len(state.candle_data[stock]))
-
-    print("\nAnalytics:")
+    print("\nAnalytics & Patterns:")
     for stock in state.stock_prices:
         ratio = risk_engine.get_ratio(stock)
         pattern = pattern_engine.detect(stock)
-        print(stock,
-              "RiskRatio:", round(ratio, 4),
-              "Pattern:", pattern)
+        print(f"{stock:12} | Risk: {round(ratio, 4):<8} | Pattern: {pattern}")
 
-    print("\nActive Events:", len(event_engine.active_events))
+    print(f"\nActive Events: {len(event_engine.active_events)}")
 
-    # -------- STEP 3: AI NEWS --------
+    # -------- STEP 3: AI NEWS GENERATION --------
     current_time = time.time()
 
     if current_time - last_news_time > NEWS_INTERVAL:
+        print("\n🧠 [AI] Generating News Items...")
 
-        print("\n🧠 Generating AI News...")
-
+        # This calls your new rotation logic internally
         news_list = news_engine.generate_news()
 
         if news_list and isinstance(news_list, list):
             for i, news in enumerate(news_list[:4]):
                 if news_engine.validate(news):
-                    print(f"📰 NEWS {i+1}:", news["headline"])
+                    print(f"📰 NEWS {i+1}: {news['headline']}")
+                    
+                    # Convert dict to MarketEvent and inject into the engine
                     event = news_to_event(news)
                     event_engine.add_event(event)
                 else:
-                    print(f"⚠️ Invalid news struct skipped")
+                    print(f"⚠️ Invalid news structure received for item {i+1}")
         else:
-            print("⚠️ Invalid or empty news list skipped")
+            print("⚠️ News generation skipped (Possible limit reached or empty response)")
 
         last_news_time = time.time()
 
     # -------- LOOP DELAY --------
+    # Tick speed (1 second per tick)
     time.sleep(1)

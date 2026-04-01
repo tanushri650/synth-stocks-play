@@ -11,11 +11,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import uvicorn
 from collections import defaultdict
+import pandas as pd
 
-# -------- LOAD ENV --------
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(BASE_DIR)
-load_dotenv(os.path.join(BASE_DIR, ".env"))
+# -------- LOAD ENV & PATHS --------
+# server.py is in backend/backend/
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+BACKEND_ROOT = os.path.dirname(CURRENT_DIR) # backend/
+
+if BACKEND_ROOT not in sys.path:
+    sys.path.append(BACKEND_ROOT)
+if CURRENT_DIR not in sys.path:
+    sys.path.append(CURRENT_DIR)
+
+load_dotenv(os.path.join(BACKEND_ROOT, ".env"))
 
 API_KEYS = []
 for key_name in ["GEMINI_API_KEY", "GEMINI_API_KEY1", "GEMINI_API_KEY2"]:
@@ -24,7 +32,8 @@ for key_name in ["GEMINI_API_KEY", "GEMINI_API_KEY1", "GEMINI_API_KEY2"]:
         API_KEYS.append(val)
 
 if not API_KEYS:
-    raise ValueError("❌ No GEMINI_API_KEY found in .env")
+    print("⚠️ Warning: No GEMINI_API_KEY found in .env")
+    API_KEYS = ["dummy_key"] 
 
 
 # -------- IMPORT YOUR SYSTEM --------
@@ -53,34 +62,39 @@ async def broadcast(data):
         try:
             await client.send_text(json.dumps(data))
         except:
-            pass # Handle disconnected clients gracefully
+            pass 
 
 
 # -------- LIFESPAN AND SIMULATION LOOP --------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
-    # Step 2: Load and Split CSV (25% history, 75% streaming)
+    print("📊 STEP 2: Loading CSV datasets...")
     load_csv_history()
+    print("✅ CSV Datasets Loaded.")
 
     async def loop():
         # STEP 1: INITIAL NEWS GENERATION (MANDATORY START)
         print("🚀 STEP 1: Generating Initial Market News...")
-        initial_news = news_engine.generate_news()
-        if initial_news:
-            valid_news = []
-            # we only take 4
-            for news in initial_news[:4]:
-                if news_engine.validate(news):
-                    event = news_to_event(news)
-                    event_engine.add_event(event)
-                    valid_news.append({
-                        "headline": news["headline"],
-                        "description": news["description"],
-                        "target": news["target"]
-                    })
-            if valid_news:
-                await broadcast({"type": "news_batch", "news": valid_news, "time": time.time()})
+        try:
+            initial_news = news_engine.generate_news()
+            if initial_news:
+                valid_news = []
+                for news in initial_news[:4]:
+                    if news_engine.validate(news):
+                        event = news_to_event(news)
+                        event_engine.add_event(event)
+                        valid_news.append({
+                            "headline": news["headline"],
+                            "description": news["description"],
+                            "target": news["target"]
+                        })
+                if valid_news:
+                    state.current_news = valid_news
+                    await broadcast({"type": "news_batch", "news": valid_news, "time": time.time()})
+                    print(f"✅ News Broadcasted: {len(valid_news)} items.")
+        except Exception as e:
+            print(f"⚠️ News Generator Error: {e}")
         
         last_news_time = time.time()
         tick_counter = 0
@@ -93,7 +107,6 @@ async def lifespan(app: FastAPI):
                 tick = engine.get_streaming_tick(stock)
                 if tick:
                     tick_buffers[stock].append(tick)
-                    # Broadcast Tick (1s)
                     await broadcast({
                         "type": "tick",
                         "stock": stock,
@@ -101,7 +114,6 @@ async def lifespan(app: FastAPI):
                         "time": tick["time"]
                     })
                     
-                    # Broadcast Analytics (Sync with data)
                     pattern = pattern_engine.detect(stock)
                     risk_reward = risk_engine.get_ratio(stock)
                     await broadcast({
@@ -147,12 +159,11 @@ async def lifespan(app: FastAPI):
                                 "target": news["target"]
                             })
                     if valid_news:
+                        state.current_news = valid_news
                         await broadcast({"type": "news_batch", "news": valid_news, "time": current_time})
                 last_news_time = current_time
 
-            # EVENT CLEANUP
             event_engine.cleanup()
-            
             await asyncio.sleep(1)
 
     task = asyncio.create_task(loop())
@@ -171,20 +182,83 @@ app.add_middleware(
 )
 
 
+import time
+
+# -------- LIVE TRADING DATA API --------
+@app.get("/api/live-trading/data/{symbol}")
+async def get_live_trading_data(symbol: str):
+    # Map symbols to CSV filenames
+    mapping = {
+        "TCS": "TCS.csv",
+        "INFOSYS": "INFOSYS.csv",
+        "HDFCBANK": "HDFCBANK.csv",
+        "RELIANCE": "RELIANCE.csv",
+        "TATA_MOTORS": "TATA_MOTORS.csv"
+    }
+    
+    filename = mapping.get(symbol.upper())
+    if not filename:
+        return {"error": f"Invalid symbol: {symbol}"}
+
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    data_path = os.path.join(os.path.dirname(current_dir), "live_trading", "data", filename)
+
+    if not os.path.exists(data_path):
+        return {"error": f"Data file not found: {filename}"}
+
+    try:
+        # yfinance CSVs have 3 header rows. 
+        df = pd.read_csv(data_path, skiprows=3, names=['Datetime', 'Close', 'High', 'Low', 'Open', 'Volume'])
+        
+        # --- SYNTHESIZED TIME LOGIC ---
+        # Requirement: Ignore CSV timestamps. 
+        # Last point = Current Time.
+        # Spacing = Exactly 1 second per point.
+        now = int(time.time())
+        num_points = len(df)
+        
+        # Generate strictly increasing 1-second intervals ending at 'now'
+        # Formula: time_at_index_i = now - (last_index - i)
+        synthesized_times = [now - (num_points - 1 - i) for i in range(num_points)]
+        
+        # Format for frontend
+        data = []
+        for i, (_, row) in enumerate(df.iterrows()):
+            data.append({
+                "time": synthesized_times[i],
+                "open": float(row['Open']),
+                "high": float(row['High']),
+                "low": float(row['Low']),
+                "close": float(row['Close']),
+                "volume": int(row['Volume'])
+            })
+        
+        return {"symbol": symbol, "data": data}
+    except Exception as e:
+        print(f"❌ Error parsing {filename}: {e}")
+        return {"error": str(e)}
+
+
 # -------- WEBSOCKET ENDPOINT --------
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
     clients.append(ws)
 
-    # Step 3: INITIAL GRAPH RENDERING (Send 25% History)
-    for stock in state.stock_prices:
+    for stock in ["TCS", "INFY", "HDFCBANK", "MARUTI"]:
         if state.candle_data[stock]:
             await ws.send_text(json.dumps({
                 "type": "history",
                 "stock": stock,
                 "data": state.candle_data[stock]
             }))
+    
+    if state.current_news:
+        await ws.send_text(json.dumps({
+            "type": "news_batch",
+            "news": state.current_news,
+            "time": time.time()
+        }))
 
     try:
         while True:
@@ -196,4 +270,5 @@ async def websocket_endpoint(ws: WebSocket):
 
 # -------- ENTRY POINT --------
 if __name__ == "__main__":
-    uvicorn.run("server:app", host="localhost", port=8080, reload=True)
+    # Use 0.0.0.0 for deployment visibility
+    uvicorn.run("server:app", host="0.0.0.0", port=8080, reload=True)

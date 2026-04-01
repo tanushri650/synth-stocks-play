@@ -2,37 +2,35 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useUser } from '@/contexts/UserContext';
 import { Layout } from '@/components/Layout';
-import {
-  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  BarChart, Bar, CartesianGrid, ComposedChart, Cell
-} from 'recharts';
+import { 
+  createChart, 
+  ColorType, 
+  ISeriesApi, 
+  CandlestickSeries, 
+  LineSeries, 
+  HistogramSeries,
+  IChartApi,
+  SeriesType
+} from 'lightweight-charts';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Search, TrendingUp, TrendingDown, Clock, RefreshCw, AlertTriangle, Plus, Minus } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-
-const ALPHA_VANTAGE_API_KEY = 'ALPHA_MY_API_KEY';
+import { Link } from 'react-router-dom';
 
 const PRESET_STOCKS = [
-  { symbol: 'IBM', name: 'IBM Corp' },
-  { symbol: 'AAPL', name: 'Apple Inc' },
-  { symbol: 'MSFT', name: 'Microsoft Corp' },
-  { symbol: 'GOOGL', name: 'Alphabet Inc' },
-  { symbol: 'TSLA', name: 'Tesla Inc' },
+  { symbol: 'TCS', name: 'TCS' },
+  { symbol: 'RELIANCE', name: 'RELIANCE' },
+  { symbol: 'INFOSYS', name: 'INFOSYS' },
+  { symbol: 'HDFCBANK', name: 'HDFC BANK' },
+  { symbol: 'TATA_MOTORS', name: 'TATA MOTORS' },
 ];
 
 const CHART_TYPES = ['Line', 'Candlestick', 'Volume'] as const;
-const TIME_RANGES = [
-  { label: '15m', minutes: 15 },
-  { label: '1h', minutes: 60 },
-  { label: '3h', minutes: 180 },
-  { label: 'All', minutes: 9999 },
-];
-
 type ChartType = typeof CHART_TYPES[number];
 
 interface StockPoint {
-  time: string;
+  time: number;
   open: number;
   high: number;
   low: number;
@@ -40,71 +38,64 @@ interface StockPoint {
   volume: number;
 }
 
-interface StockMeta {
-  symbol: string;
-  lastRefreshed: string;
-  interval: string;
-}
-
 const LiveTrading = () => {
   const { user, spendCoins, addCoins, updateHoldings, incrementTrades, addTradeMistake } = useUser();
 
-  // Chart state
-  const [ticker, setTicker] = useState('IBM');
+  // 1. Guard for uninitialized users
+  if (!user) {
+    return (
+      <Layout>
+        <div className="flex flex-col items-center justify-center min-h-[70vh] space-y-6 text-center px-4">
+          <div className="w-20 h-20 rounded-full bg-destructive/10 flex items-center justify-center border border-destructive/20 animate-pulse">
+            <AlertTriangle className="h-10 w-10 text-destructive" />
+          </div>
+          <div className="space-y-2">
+            <h2 className="font-display text-2xl text-foreground tracking-tighter">Access Restricted</h2>
+            <p className="font-mono text-xs text-muted-foreground max-w-xs">
+              Trading profile not found. Please initialize your account on the terminal to start live simulations.
+            </p>
+          </div>
+          <Link to="/">
+            <Button size="lg" className="bg-primary text-primary-foreground font-mono text-xs tracking-widest px-8">
+              RETURN TO TERMINAL
+            </Button>
+          </Link>
+        </div>
+      </Layout>
+    );
+  }
+
+  // 2. Component Logic (Only starts if user exists)
+  const [ticker, setTicker] = useState('TCS');
   const [searchInput, setSearchInput] = useState('');
-  const [chartType, setChartType] = useState<ChartType>('Line');
-  const [timeRange, setTimeRange] = useState(9999);
+  const [chartType, setChartType] = useState<ChartType>('Candlestick');
   const [data, setData] = useState<StockPoint[]>([]);
-  const [meta, setMeta] = useState<StockMeta | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Trading state
   const [qty, setQty] = useState(1);
   const [tradeMsg, setTradeMsg] = useState('');
+
+  const chartContainerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const mainSeriesRef = useRef<ISeriesApi<SeriesType> | null>(null);
+  const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
 
   const fetchData = useCallback(async (symbol: string) => {
     setLoading(true);
     setError(null);
     try {
-      const url = `https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol=${symbol}&interval=5min&apikey=${ALPHA_VANTAGE_API_KEY}`;
-      const res = await fetch(url);
+      const res = await fetch(`http://localhost:8080/api/live-trading/data/${symbol}`);
       const json = await res.json();
 
-      if (json['Note'] || json['Information']) {
-        setError('API rate limit reached (25 req/day free tier). Try again later.');
-        setLoading(false);
-        return;
+      if (json.error) {
+        setError(json.error);
+        setData([]);
+      } else {
+        setData(json.data);
       }
-
-      const timeSeries = json['Time Series (5min)'];
-      if (!timeSeries) {
-        setError(`No data for "${symbol}". Check the ticker.`);
-        setLoading(false);
-        return;
-      }
-
-      const metaData = json['Meta Data'];
-      setMeta({
-        symbol: metaData['2. Symbol'],
-        lastRefreshed: metaData['3. Last Refreshed'],
-        interval: metaData['4. Interval'],
-      });
-
-      const points: StockPoint[] = Object.entries(timeSeries)
-        .map(([time, values]: [string, any]) => ({
-          time,
-          open: parseFloat(values['1. open']),
-          high: parseFloat(values['2. high']),
-          low: parseFloat(values['3. low']),
-          close: parseFloat(values['4. close']),
-          volume: parseInt(values['5. volume']),
-        }))
-        .reverse();
-
-      setData(points);
     } catch {
-      setError('Failed to fetch data. Check your connection.');
+      setError('Failed to connect to backend server. Ensure Port 8080 is running.');
     }
     setLoading(false);
   }, []);
@@ -113,13 +104,119 @@ const LiveTrading = () => {
     fetchData(ticker);
   }, [ticker, fetchData]);
 
+  useEffect(() => {
+    if (!chartContainerRef.current) return;
+
+    const chart = createChart(chartContainerRef.current, {
+      layout: {
+        background: { type: ColorType.Solid, color: 'transparent' },
+        textColor: 'hsl(220, 10%, 50%)',
+      },
+      grid: {
+        vertLines: { color: 'hsl(230, 15%, 15%)' },
+        horzLines: { color: 'hsl(230, 15%, 15%)' },
+      },
+      crosshair: {
+        mode: 0,
+        vertLine: { labelBackgroundColor: 'hsl(185, 100%, 50%)' },
+        horzLine: { labelBackgroundColor: 'hsl(185, 100%, 50%)' },
+      },
+      timeScale: {
+        borderColor: 'hsl(230, 15%, 15%)',
+        timeVisible: true,
+        secondsVisible: true,
+      },
+      handleScroll: true,
+      handleScale: true,
+    });
+
+    chartRef.current = chart;
+
+    const handleResize = () => {
+      if (chartContainerRef.current) {
+        chart.applyOptions({ width: chartContainerRef.current.clientWidth });
+      }
+    };
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      chart.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!chartRef.current || data.length === 0) return;
+
+    if (mainSeriesRef.current) chartRef.current.removeSeries(mainSeriesRef.current);
+    if (volumeSeriesRef.current) chartRef.current.removeSeries(volumeSeriesRef.current);
+
+    if (chartType === 'Volume') {
+      const volumeSeries = chartRef.current.addSeries(HistogramSeries, {
+        color: 'hsl(185, 100%, 50%)',
+        priceFormat: { type: 'volume' },
+      });
+      volumeSeries.setData(data.map(p => ({
+        time: p.time as any,
+        value: p.volume,
+        color: p.close >= p.open ? 'rgba(34, 197, 94, 0.5)' : 'rgba(239, 68, 68, 0.5)'
+      })));
+      volumeSeriesRef.current = volumeSeries;
+      mainSeriesRef.current = null;
+    } else {
+      if (chartType === 'Candlestick') {
+        const candleSeries = chartRef.current.addSeries(CandlestickSeries, {
+          upColor: 'hsl(150, 100%, 45%)',
+          downColor: 'hsl(0, 80%, 55%)',
+          borderVisible: false,
+          wickUpColor: 'hsl(150, 100%, 45%)',
+          wickDownColor: 'hsl(0, 80%, 55%)',
+        });
+        candleSeries.setData(data.map(p => ({
+          time: p.time as any,
+          open: p.open,
+          high: p.high,
+          low: p.low,
+          close: p.close
+        })));
+        mainSeriesRef.current = candleSeries;
+      } else {
+        const lineSeries = chartRef.current.addSeries(LineSeries, {
+          color: 'hsl(185, 100%, 50%)',
+          lineWidth: 2,
+        });
+        lineSeries.setData(data.map(p => ({
+          time: p.time as any,
+          value: p.close
+        })));
+        mainSeriesRef.current = lineSeries;
+      }
+
+      const volumeSeries = chartRef.current.addSeries(HistogramSeries, {
+        color: 'rgba(185, 100, 50, 0.3)',
+        priceFormat: { type: 'volume' },
+        priceScaleId: '', 
+      });
+      volumeSeries.priceScale().applyOptions({
+        scaleMargins: { top: 0.8, bottom: 0 },
+      });
+      volumeSeries.setData(data.map(p => ({
+          time: p.time as any,
+          value: p.volume,
+          color: p.close >= p.open ? 'rgba(34, 197, 94, 0.3)' : 'rgba(239, 68, 68, 0.3)'
+      })));
+      volumeSeriesRef.current = volumeSeries;
+    }
+
+    chartRef.current.timeScale().fitContent();
+
+  }, [data, chartType]);
+
   const handleSearch = () => {
     const sym = searchInput.trim().toUpperCase();
     if (sym) { setTicker(sym); setSearchInput(''); }
   };
 
-  // Derived chart data
-  const filteredData = timeRange === 9999 ? data : data.slice(-(timeRange / 5));
   const currentPrice = data.length > 0 ? data[data.length - 1].close : 0;
   const prevPrice = data.length > 1 ? data[data.length - 2].close : currentPrice;
   const priceChange = currentPrice - prevPrice;
@@ -127,14 +224,7 @@ const LiveTrading = () => {
   const isUp = priceChange >= 0;
   const dayHigh = data.length > 0 ? Math.max(...data.map(d => d.high)) : 0;
   const dayLow = data.length > 0 ? Math.min(...data.map(d => d.low)) : 0;
-  const totalVolume = data.reduce((sum, d) => sum + d.volume, 0);
 
-  const formatTime = (t: string) => {
-    const parts = t.split(' ');
-    return parts.length > 1 ? parts[1].slice(0, 5) : t;
-  };
-
-  // Trading logic using real prices
   const stockName = PRESET_STOCKS.find(s => s.symbol === ticker)?.name || ticker;
   const holding = user?.holdings.find(h => h.symbol === ticker);
 
@@ -173,85 +263,6 @@ const LiveTrading = () => {
     setTradeMsg(`Sold ${qty} ${ticker} @ $${currentPrice.toFixed(2)} for ${revenue.toLocaleString()} coins`);
   };
 
-  // Chart rendering
-  const renderChart = () => {
-    if (filteredData.length === 0) return null;
-    const yDomain = [
-      Math.min(...filteredData.map(d => d.low)) * 0.999,
-      Math.max(...filteredData.map(d => d.high)) * 1.001,
-    ];
-
-    if (chartType === 'Volume') {
-      return (
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={filteredData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="hsl(230, 15%, 15%)" />
-            <XAxis dataKey="time" tickFormatter={formatTime} tick={{ fill: 'hsl(220, 10%, 50%)', fontSize: 10 }} />
-            <YAxis tick={{ fill: 'hsl(220, 10%, 50%)', fontSize: 10 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}K`} />
-            <Tooltip
-              contentStyle={{ background: 'hsl(230, 20%, 10%)', border: '1px solid hsl(185, 40%, 20%)', borderRadius: 8, fontFamily: 'Share Tech Mono' }}
-              labelFormatter={formatTime}
-              formatter={(v: number) => [v.toLocaleString(), 'Volume']}
-            />
-            <Bar dataKey="volume" radius={[2, 2, 0, 0]}>
-              {filteredData.map((entry, i) => (
-                <Cell key={i} fill={entry.close >= entry.open ? 'hsl(150, 100%, 45%)' : 'hsl(0, 80%, 55%)'} fillOpacity={0.7} />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      );
-    }
-
-    if (chartType === 'Candlestick') {
-      return (
-        <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={filteredData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="hsl(230, 15%, 15%)" />
-            <XAxis dataKey="time" tickFormatter={formatTime} tick={{ fill: 'hsl(220, 10%, 50%)', fontSize: 10 }} />
-            <YAxis domain={yDomain} tick={{ fill: 'hsl(220, 10%, 50%)', fontSize: 10 }} tickFormatter={(v) => `$${v.toFixed(0)}`} />
-            <Tooltip
-              contentStyle={{ background: 'hsl(230, 20%, 10%)', border: '1px solid hsl(185, 40%, 20%)', borderRadius: 8, fontFamily: 'Share Tech Mono' }}
-              labelFormatter={formatTime}
-              formatter={(v: number, name: string) => [`$${v.toFixed(2)}`, name.charAt(0).toUpperCase() + name.slice(1)]}
-            />
-            <Bar dataKey="close" barSize={8}>
-              {filteredData.map((entry, i) => (
-                <Cell key={i} fill={entry.close >= entry.open ? 'hsl(150, 100%, 45%)' : 'hsl(0, 80%, 55%)'} />
-              ))}
-            </Bar>
-            <Line type="monotone" dataKey="high" stroke="hsl(185, 100%, 50%)" dot={false} strokeWidth={1} strokeDasharray="2 2" />
-            <Line type="monotone" dataKey="low" stroke="hsl(320, 100%, 60%)" dot={false} strokeWidth={1} strokeDasharray="2 2" />
-          </ComposedChart>
-        </ResponsiveContainer>
-      );
-    }
-
-    return (
-      <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={filteredData}>
-          <defs>
-            <linearGradient id="lineGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="hsl(185, 100%, 50%)" stopOpacity={0.3} />
-              <stop offset="95%" stopColor="hsl(185, 100%, 50%)" stopOpacity={0} />
-            </linearGradient>
-          </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="hsl(230, 15%, 15%)" />
-          <XAxis dataKey="time" tickFormatter={formatTime} tick={{ fill: 'hsl(220, 10%, 50%)', fontSize: 10 }} />
-          <YAxis domain={yDomain} tick={{ fill: 'hsl(220, 10%, 50%)', fontSize: 10 }} tickFormatter={(v) => `$${v.toFixed(0)}`} />
-          <Tooltip
-            contentStyle={{ background: 'hsl(230, 20%, 10%)', border: '1px solid hsl(185, 40%, 20%)', borderRadius: 8, fontFamily: 'Share Tech Mono' }}
-            labelFormatter={formatTime}
-            formatter={(v: number) => [`$${v.toFixed(2)}`, 'Price']}
-          />
-          <Line type="monotone" dataKey="close" stroke="hsl(185, 100%, 50%)" strokeWidth={2} dot={false} activeDot={{ r: 4, fill: 'hsl(185, 100%, 50%)' }} />
-        </LineChart>
-      </ResponsiveContainer>
-    );
-  };
-
-  if (!user) return null;
-
   return (
     <Layout>
       <div className="max-w-7xl mx-auto space-y-4 p-2">
@@ -289,7 +300,7 @@ const LiveTrading = () => {
                   : 'bg-muted text-muted-foreground hover:text-foreground border border-border'
               }`}
             >
-              {s.symbol}
+              {s.name}
             </button>
           ))}
         </div>
@@ -311,15 +322,14 @@ const LiveTrading = () => {
 
         {/* Main Layout: Chart + Trading Panel */}
         <div className="grid lg:grid-cols-3 gap-4">
-          {/* Left: Chart Area (2/3) */}
           <div className="lg:col-span-2 space-y-4">
             {/* Price Header */}
-            {meta && data.length > 0 && (
+            {data.length > 0 && (
               <div className="card-cyber flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
                 <div>
-                  <h2 className="font-display text-lg tracking-wider text-foreground">{meta.symbol}</h2>
+                  <h2 className="font-display text-lg tracking-wider text-foreground">{ticker}</h2>
                   <div className="flex items-center gap-3 mt-1">
-                    <span className="font-mono text-2xl text-foreground">${currentPrice.toFixed(2)}</span>
+                    <span className="font-mono text-2xl text-foreground">₹{currentPrice.toLocaleString()}</span>
                     <span className={`font-mono text-sm flex items-center gap-1 ${isUp ? 'text-[hsl(150,100%,45%)]' : 'text-destructive'}`}>
                       {isUp ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
                       {isUp ? '+' : ''}{priceChange.toFixed(2)} ({priceChangePercent.toFixed(2)}%)
@@ -327,10 +337,9 @@ const LiveTrading = () => {
                   </div>
                 </div>
                 <div className="flex gap-4 text-xs font-mono text-muted-foreground">
-                  <div>High: <span className="text-[hsl(150,100%,45%)]">${dayHigh.toFixed(2)}</span></div>
-                  <div>Low: <span className="text-destructive">${dayLow.toFixed(2)}</span></div>
-                  <div>Vol: <span className="text-foreground">{(totalVolume / 1e6).toFixed(2)}M</span></div>
-                  <div className="flex items-center gap-1"><Clock className="h-3 w-3" />{formatTime(meta.lastRefreshed)}</div>
+                  <div>High: <span className="text-[hsl(150,100%,45%)]">₹{dayHigh.toLocaleString()}</span></div>
+                  <div>Low: <span className="text-destructive">₹{dayLow.toLocaleString()}</span></div>
+                  <div className="flex items-center gap-1"><Clock className="h-3 w-3" />1s Synthesized</div>
                 </div>
               </div>
             )}
@@ -346,63 +355,53 @@ const LiveTrading = () => {
                       }`}>{ct}</button>
                   ))}
                 </div>
-                <div className="flex gap-1">
-                  {TIME_RANGES.map((tr) => (
-                    <button key={tr.label} onClick={() => setTimeRange(tr.minutes)}
-                      className={`px-2 py-1 rounded font-mono text-xs transition-all ${
-                        timeRange === tr.minutes ? 'bg-secondary/20 text-secondary border border-secondary/40' : 'text-muted-foreground hover:text-foreground'
-                      }`}>{tr.label}</button>
-                  ))}
+                <div className="font-mono text-[10px] text-muted-foreground uppercase tracking-widest px-2">
+                   Interactive (Drag to Pan • Scroll to Zoom • 1s Ticks)
                 </div>
               </div>
-              <div className="h-[350px] p-3">
-                {loading ? (
-                  <div className="h-full flex items-center justify-center">
-                    <div className="flex flex-col items-center gap-3">
-                      <RefreshCw className="h-8 w-8 text-primary animate-spin" />
-                      <span className="font-mono text-xs text-muted-foreground">Fetching market data...</span>
+              <div className="h-[450px] p-3 relative" ref={chartContainerRef}>
+                {loading && (
+                  <div className="absolute inset-0 z-10 bg-background/50 flex items-center justify-center">
+                    <RefreshCw className="h-8 w-8 text-primary animate-spin" />
+                  </div>
+                )}
+                {data.length === 0 && !loading && (
+                    <div className="h-full flex items-center justify-center text-muted-foreground font-mono text-xs">
+                        No data found. Ensure stocks are downloaded in live_trading/data/
                     </div>
-                  </div>
-                ) : data.length > 0 ? renderChart() : (
-                  <div className="h-full flex items-center justify-center">
-                    <span className="font-mono text-xs text-muted-foreground">No data available</span>
-                  </div>
                 )}
               </div>
             </div>
           </div>
 
-          {/* Right: Trading Panel (1/3) */}
+          {/* Training Panel */}
           <div className="space-y-4">
-            {/* Balance */}
             <div className="card-cyber text-center">
               <p className="font-mono text-xs text-muted-foreground mb-1">Your Balance</p>
               <p className="font-display text-2xl text-primary text-glow-cyan">{user.coins.toLocaleString()}</p>
               <p className="font-mono text-xs text-muted-foreground">coins</p>
             </div>
 
-            {/* Current Stock Info */}
             <div className="card-cyber">
               <p className="font-display text-sm text-foreground mb-2">{ticker} — {stockName}</p>
               <div className="grid grid-cols-2 gap-2 text-xs font-mono">
                 <div className="text-muted-foreground">Current Price</div>
-                <div className="text-primary text-right">${currentPrice.toFixed(2)}</div>
+                <div className="text-primary text-right">₹{currentPrice.toLocaleString()}</div>
                 <div className="text-muted-foreground">You Hold</div>
                 <div className="text-foreground text-right">{holding?.shares ?? 0} shares</div>
                 {holding && (
                   <>
                     <div className="text-muted-foreground">Avg Price</div>
-                    <div className="text-foreground text-right">${holding.avgPrice.toFixed(2)}</div>
+                    <div className="text-foreground text-right">₹{holding.avgPrice.toLocaleString()}</div>
                     <div className="text-muted-foreground">P&L</div>
                     <div className={`text-right ${currentPrice >= holding.avgPrice ? 'text-[hsl(150,100%,45%)]' : 'text-destructive'}`}>
-                      {currentPrice >= holding.avgPrice ? '+' : ''}{((currentPrice - holding.avgPrice) * holding.shares).toFixed(2)}
+                      {currentPrice >= holding.avgPrice ? '+' : ''}{((currentPrice - holding.avgPrice) * holding.shares).toLocaleString()}
                     </div>
                   </>
                 )}
               </div>
             </div>
 
-            {/* Quantity & Trade Buttons */}
             <div className="card-cyber">
               <label className="font-mono text-xs text-muted-foreground block mb-2">Quantity</label>
               <div className="flex items-center justify-center gap-3 mb-3">
@@ -428,38 +427,19 @@ const LiveTrading = () => {
                 </button>
                 <button onClick={sell}
                   className="py-2 rounded font-mono text-xs font-bold tracking-wider bg-destructive text-destructive-foreground hover:opacity-90 transition-opacity disabled:opacity-50"
-                  disabled={currentPrice <= 0}>
+                  disabled={holding?.shares === 0 || !holding}>
                   SELL
                 </button>
               </div>
               <AnimatePresence>
                 {tradeMsg && (
-                  <motion.p
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="font-mono text-xs text-[hsl(150,100%,45%)] mt-3 text-center"
-                  >
+                  <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                    className="font-mono text-xs text-[hsl(150,100%,45%)] mt-3 text-center">
                     {tradeMsg}
                   </motion.p>
                 )}
               </AnimatePresence>
             </div>
-
-            {/* Holdings Summary */}
-            {user.holdings.length > 0 && (
-              <div className="card-cyber">
-                <p className="font-mono text-xs text-muted-foreground mb-2">Your Holdings</p>
-                <div className="space-y-2 max-h-40 overflow-y-auto">
-                  {user.holdings.map(h => (
-                    <div key={h.symbol} className="flex justify-between items-center text-xs font-mono">
-                      <span className="text-foreground">{h.symbol}</span>
-                      <span className="text-muted-foreground">{h.shares} @ ${h.avgPrice.toFixed(2)}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         </div>
       </div>

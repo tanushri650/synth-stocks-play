@@ -36,5 +36,6 @@ class MarketState:
         self.price_offsets = defaultdict(float) # For news impact persistence
         
         self.base_prices = self.stock_prices.copy()
+        self.current_news = []
 
 state = MarketState()
