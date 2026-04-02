@@ -3,28 +3,42 @@ import json
 import re
 import os
 import dotenv
+import asyncio
 from google import genai
 
 # Load environment variables from .env file
 dotenv.load_dotenv()
 
 class NewsEngine:
-    def __init__(self):
+    def __init__(self, api_keys=None):
         """
         Initializes the NewsEngine by loading multiple API keys 
         and setting up the first Gemini client.
         """
-        # 1. Load keys from .env and clean them (remove spaces/newlines)
-        api_keys_string = os.getenv("GEMINI_API_KEY", "")
-        if not api_keys_string:
-            raise ValueError("CRITICAL: GEMINI_API_KEY not found in your .env file.")
+        # 1. User provided keys take precedence
+        if api_keys:
+            self.api_keys = api_keys
+        else:
+            # Fallback to loading from .env
+            api_keys_string = os.getenv("GEMINI_API_KEY", "")
+            # Handle comma-separated list
+            self.api_keys = [k.strip() for k in api_keys_string.split(",") if k.strip()]
             
-        # This handles 'key1, key2, key3' by stripping whitespace from each key
-        self.api_keys = [k.strip() for k in api_keys_string.split(",") if k.strip()]
+            # Also check for individual keys GEMINI_API_KEY1, GEMINI_API_KEY2, etc.
+            for i in range(1, 10):
+                key = os.getenv(f"GEMINI_API_KEY{i}")
+                if key and key not in self.api_keys:
+                    self.api_keys.append(key)
+
+        if not self.api_keys:
+            print("⚠️ Warning: No GEMINI_API_KEY found in .env")
+            self.api_keys = ["dummy_key"]
+            
         self.current_index = 0
         
         # 2. Initialize the first client
         self._init_client()
+
 
     def _init_client(self):
         """Sets up the Gemini client with the current active key."""
@@ -38,7 +52,7 @@ class NewsEngine:
         self.current_index = (self.current_index + 1) % len(self.api_keys)
         self._init_client()
 
-    def generate_news(self):
+    async def generate_news(self):
         """
         Main function to generate news. 
         Tries every available key if one hits a rate limit (429).
@@ -48,8 +62,9 @@ class NewsEngine:
         # We try at most as many times as we have keys
         for attempt in range(len(self.api_keys)):
             try:
-                # API Call
-                response = self.client.models.generate_content(
+                # Use to_thread to keep the event loop responsive during the network call
+                response = await asyncio.to_thread(
+                    self.client.models.generate_content,
                     model="gemini-2.0-flash", 
                     contents=prompt
                 )
@@ -70,17 +85,18 @@ class NewsEngine:
                 
                 # Check for "Too Many Requests" (429) or Quota limits
                 if "429" in error_str or "quota" in error_str or "limit" in error_str:
-                    print(f"!!! [LIMIT] Key #{self.current_index + 1} exhausted.")
+                    print(f"!!! [LIMIT] Key #{self.current_index + 1} exhausted.", flush=True)
                     self._switch_key()
-                    time.sleep(1) # Small buffer before retry
+                    await asyncio.sleep(1) # Async sleep instead of time.sleep
                     continue
                 else:
                     # For other errors (Internet, Auth, etc.), log and wait
-                    print(f"!!! [ERROR] Unexpected: {e}")
-                    time.sleep(2)
+                    print(f"!!! [ERROR] Unexpected: {e}", flush=True)
+                    await asyncio.sleep(2)
         
-        print("!!! [FATAL] All API keys are exhausted for the day.")
+        print("!!! [FATAL] All API keys are exhausted for the day.", flush=True)
         return None
+
 
     def _build_prompt(self):
         """Constructs the prompt for the Gemini model."""

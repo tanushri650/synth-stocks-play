@@ -288,7 +288,7 @@ const BiweeklyTestContent = () => {
           </h3>
           <div className="flex-1 overflow-hidden h-full flex items-center rounded-md">
             <div className="news-marquee font-mono text-[30px] font-bold text-primary/90 tracking-wider">
-              {newsList.length > 0 ? newsList.join("   ///   ") : "[AWAITING LIVE DATA STREAM...] /// [INITIALIZING...]"}
+              {newsList.length > 0 ? newsList.join("   ///   ") : "RBI actions increase volatility in markets  Tata Motors Unveils Flying Electric Car Prototype   Infosys Plans 3-Day Work Week   Infosys Launches “AI CEO” to Run Company Operations"}
             </div>
           </div>
         </div>

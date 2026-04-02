@@ -1,6 +1,6 @@
-# backend/server.py
-
+print("DEBUG: server.py execution started")
 from fastapi import FastAPI, WebSocket
+
 import asyncio
 import json
 import time
@@ -23,17 +23,23 @@ if BACKEND_ROOT not in sys.path:
 if CURRENT_DIR not in sys.path:
     sys.path.append(CURRENT_DIR)
 
+print("DEBUG: Loading environment...", flush=True)
 load_dotenv(os.path.join(BACKEND_ROOT, ".env"))
 
+# Load keys from GEMINI_API_KEY (comma-separated) or GEMINI_API_KEY1, GEMINI_API_KEY2 etc.
 API_KEYS = []
-for key_name in ["GEMINI_API_KEY", "GEMINI_API_KEY1", "GEMINI_API_KEY2"]:
-    val = os.getenv(key_name)
-    if val:
+raw_keys = os.getenv("GEMINI_API_KEY", "")
+if raw_keys:
+    API_KEYS = [k.strip() for k in raw_keys.split(",") if k.strip()]
+
+for i in range(1, 10):
+    val = os.getenv(f"GEMINI_API_KEY{i}")
+    if val and val not in API_KEYS:
         API_KEYS.append(val)
 
 if not API_KEYS:
     print("⚠️ Warning: No GEMINI_API_KEY found in .env")
-    API_KEYS = ["dummy_key"] 
+    API_KEYS = ["dummy_key"]
 
 
 # -------- IMPORT YOUR SYSTEM --------
@@ -47,13 +53,20 @@ from analytics.pattern_engine import PatternEngine
 from analytics.risk_engine import RiskEngine
 
 # -------- INITIALIZE SYSTEM --------
-event_engine = EventEngine(state.sector_map)
-engine = MarketEngine(state, event_engine)
-candle_engine = CandleEngine()
-news_engine = NewsEngine(API_KEYS)
-pattern_engine = PatternEngine()
-risk_engine = RiskEngine()
-clients = []
+try:
+    print("DEBUG: Initializing engines...", flush=True)
+    event_engine = EventEngine(state.sector_map)
+    engine = MarketEngine(state, event_engine)
+    candle_engine = CandleEngine()
+    news_engine = NewsEngine(API_KEYS)
+    pattern_engine = PatternEngine()
+    risk_engine = RiskEngine()
+    clients = []
+except Exception as e:
+    print(f"❌ CRITICAL INITIALIZATION ERROR: {e}", flush=True)
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
 
 
 # -------- BROADCAST FUNCTION --------
@@ -68,88 +81,23 @@ async def broadcast(data):
 # -------- LIFESPAN AND SIMULATION LOOP --------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-
-    print("📊 STEP 2: Loading CSV datasets...")
-    load_csv_history()
-    print("✅ CSV Datasets Loaded.")
+    print("📊 STEP 2: Loading CSV datasets...", flush=True)
+    try:
+        load_csv_history()
+        print("✅ CSV Datasets Loaded.", flush=True)
+    except Exception as e:
+        print(f"❌ Error loading CSVs: {e}", flush=True)
 
     async def loop():
-        # STEP 1: INITIAL NEWS GENERATION (MANDATORY START)
-        print("🚀 STEP 1: Generating Initial Market News...")
         try:
-            initial_news = news_engine.generate_news()
-            if initial_news:
-                valid_news = []
-                for news in initial_news[:4]:
-                    if news_engine.validate(news):
-                        event = news_to_event(news)
-                        event_engine.add_event(event)
-                        valid_news.append({
-                            "headline": news["headline"],
-                            "description": news["description"],
-                            "target": news["target"]
-                        })
-                if valid_news:
-                    state.current_news = valid_news
-                    await broadcast({"type": "news_batch", "news": valid_news, "time": time.time()})
-                    print(f"✅ News Broadcasted: {len(valid_news)} items.")
-        except Exception as e:
-            print(f"⚠️ News Generator Error: {e}")
-        
-        last_news_time = time.time()
-        tick_counter = 0
-        tick_buffers = defaultdict(list)
-
-        print("📈 STEP 4/5: Starting Live Simulation Loop...")
-        while True:
-            # -------- TICK UPDATE (Every 1s) --------
-            for stock in ["TCS", "INFY", "HDFCBANK", "MARUTI"]:
-                tick = engine.get_streaming_tick(stock)
-                if tick:
-                    tick_buffers[stock].append(tick)
-                    await broadcast({
-                        "type": "tick",
-                        "stock": stock,
-                        "price": tick["price"],
-                        "time": tick["time"]
-                    })
-                    
-                    pattern = pattern_engine.detect(stock)
-                    risk_reward = risk_engine.get_ratio(stock)
-                    await broadcast({
-                        "type": "analytics",
-                        "stock": stock,
-                        "pattern": pattern,
-                        "riskReward": risk_reward,
-                        "time": tick["time"]
-                    })
-
-            # -------- CANDLE UPDATE (Every 5s) --------
-            tick_counter += 1
-            if tick_counter >= 5:
-                for stock in ["TCS", "INFY", "HDFCBANK", "MARUTI"]:
-                    candle = engine.aggregate_candle(stock, tick_buffers[stock])
-                    if candle:
-                        await broadcast({
-                            "type": "candle",
-                            "stock": stock,
-                            "open": candle["open"],
-                            "high": candle["high"],
-                            "low": candle["low"],
-                            "close": candle["close"],
-                            "volume": candle["volume"],
-                            "time": candle["time"]
-                        })
-                tick_buffers = defaultdict(list)
-                tick_counter = 0
-
-            # -------- PERIODIC NEWS (Step 1 - Every 10 mins) --------
-            current_time = time.time()
-            if current_time - last_news_time > 600:
-                new_news = news_engine.generate_news()
-                if new_news:
+            # STEP 1: INITIAL NEWS GENERATION
+            print("🚀 STEP 1: Generating Initial Market News...", flush=True)
+            try:
+                # Use await because news_engine.generate_news is now async
+                initial_news = await news_engine.generate_news()
+                if initial_news:
                     valid_news = []
-                    for news in new_news[:4]:
+                    for news in initial_news[:4]:
                         if news_engine.validate(news):
                             event = news_to_event(news)
                             event_engine.add_event(event)
@@ -160,30 +108,108 @@ async def lifespan(app: FastAPI):
                             })
                     if valid_news:
                         state.current_news = valid_news
-                        await broadcast({"type": "news_batch", "news": valid_news, "time": current_time})
-                last_news_time = current_time
+                        await broadcast({"type": "news_batch", "news": valid_news, "time": time.time()})
+                        print(f"✅ News Broadcasted: {len(valid_news)} items.", flush=True)
+            except Exception as e:
+                print(f"⚠️ News Generator Error: {e}", flush=True)
+            
+            last_news_time = time.time()
+            tick_counter = 0
+            tick_buffers = defaultdict(list)
 
-            event_engine.cleanup()
-            await asyncio.sleep(1)
+            print("📈 STEP 4/5: Starting Live Simulation Loop...", flush=True)
+            while True:
+                # -------- TICK UPDATE (Every 1s) --------
+                for stock in ["TCS", "INFY", "HDFCBANK", "MARUTI"]:
+                    tick = engine.get_streaming_tick(stock)
+                    if tick:
+                        tick_buffers[stock].append(tick)
+                        await broadcast({
+                            "type": "tick",
+                            "stock": stock,
+                            "price": tick["price"],
+                            "time": tick["time"]
+                        })
+                        
+                        pattern = pattern_engine.detect(stock)
+                        risk_reward = risk_engine.get_ratio(stock)
+                        await broadcast({
+                            "type": "analytics",
+                            "stock": stock,
+                            "pattern": pattern,
+                            "riskReward": risk_reward,
+                            "time": tick["time"]
+                        })
+
+                # -------- CANDLE UPDATE (Every 5s) --------
+                tick_counter += 1
+                if tick_counter >= 5:
+                    for stock in ["TCS", "INFY", "HDFCBANK", "MARUTI"]:
+                        candle = engine.aggregate_candle(stock, tick_buffers[stock])
+                        if candle:
+                            await broadcast({
+                                "type": "candle",
+                                "stock": stock,
+                                "open": candle["open"],
+                                "high": candle["high"],
+                                "low": candle["low"],
+                                "close": candle["close"],
+                                "volume": candle["volume"],
+                                "time": candle["time"]
+                            })
+                    tick_buffers = defaultdict(list)
+                    tick_counter = 0
+
+                # -------- PERIODIC NEWS (Every 10 mins) --------
+                current_time = time.time()
+                if current_time - last_news_time > 600:
+                    new_news = await news_engine.generate_news()
+                    if new_news:
+                        valid_news = []
+                        for news in new_news[:4]:
+                            if news_engine.validate(news):
+                                event = news_to_event(news)
+                                event_engine.add_event(event)
+                                valid_news.append({
+                                    "headline": news["headline"],
+                                    "description": news["description"],
+                                    "target": news["target"]
+                                })
+                        if valid_news:
+                            state.current_news = valid_news
+                            await broadcast({"type": "news_batch", "news": valid_news, "time": current_time})
+                    last_news_time = current_time
+
+                event_engine.cleanup()
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            print("🛑 Server Loop Cancelled.", flush=True)
+            raise
+        except Exception as e:
+            print(f"❌ Unhandled Simulation Error: {e}", flush=True)
 
     task = asyncio.create_task(loop())
     yield
     task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
 
 
 # -------- APP INIT --------
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:5173",
+    ],
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-origins = [
-    "http://localhost:8080",               # for local dev testing
-    "https://synth-stocks-play.vercel.app",         # your Vercel URL (update this)
-]
 
 import time
 
@@ -273,5 +299,16 @@ async def websocket_endpoint(ws: WebSocket):
 
 # -------- ENTRY POINT --------
 if __name__ == "__main__":
-    # Use 0.0.0.0 for deployment visibility
-    uvicorn.run("server:app", host="0.0.0.0", port=8080, reload=True)
+    # Render assigns a port via the PORT environment variable.
+    # Default to 8080 for local development.
+    port = int(os.getenv("PORT", 10000 if os.getenv("RENDER") else 8080))
+    print(f"🚀 Starting server on port {port}...", flush=True)
+    
+    # Use the app instance directly if possible, or uvicorn.run("server:app")
+    # For local dev with reload=True, the string approach is better.
+    try:
+        uvicorn.run("server:app", host="0.0.0.0", port=port, reload=True)
+    except KeyboardInterrupt:
+        print("\n👋 Server stopped manually.", flush=True)
+    except Exception as e:
+        print(f"❌ Server Runtime Error: {e}", flush=True)
