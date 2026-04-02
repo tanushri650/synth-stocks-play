@@ -295,20 +295,3 @@ async def websocket_endpoint(ws: WebSocket):
     except:
         if ws in clients:
             clients.remove(ws)
-
-
-# -------- ENTRY POINT --------
-if __name__ == "__main__":
-    # Render assigns a port via the PORT environment variable.
-    # Default to 8080 for local development.
-    port = int(os.getenv("PORT", 10000 if os.getenv("RENDER") else 8080))
-    print(f"🚀 Starting server on port {port}...", flush=True)
-    
-    # Use the app instance directly if possible, or uvicorn.run("server:app")
-    # For local dev with reload=True, the string approach is better.
-    try:
-        uvicorn.run("server:app", host="0.0.0.0", port=port, reload=True)
-    except KeyboardInterrupt:
-        print("\n👋 Server stopped manually.", flush=True)
-    except Exception as e:
-        print(f"❌ Server Runtime Error: {e}", flush=True)
